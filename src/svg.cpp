@@ -42,11 +42,6 @@ namespace SVG {
                 x_pos = x_b;
 
             y_pos = get_slope() * (x_pos - x1()) + y1();
-
-            std::cout << x_a << " " << x_b << std::endl;
-
-            std::cout << "Length: " << length << " Discrim: " << discrim <<
-                " x: " << x_pos << " y: " << y_pos << " Slope: " << get_slope() << std::endl;
         }
         else { // Edge case:: Completely vertical lines
             x_pos = x1();
@@ -90,157 +85,23 @@ namespace SVG {
 }
 
 namespace Graphs {
-    void CartesianCoordinates::set_data(CategoricalData& data) {
-        /** Specify the min and max of the data set */
-        this->range_min = data.y_min();
-        this->range_max = data.y_max();
-    }
-
-    void CartesianCoordinates::set_data(NumericData& data) {
-        /** Specify the min and max of the data set */
-        this->domain_min = data.x_min();
-        this->domain_max = data.x_max();
-        this->range_min = data.y_min();
-        this->range_max = data.y_max();
-    }
-
-    void Plot::to_svg(const std::string filename) {
-        /** Generate an SVG */
+    void PlotBase::to_svg(const std::string filename) {
+        /** plot an SVG */
         std::ofstream svg_file(filename, std::ios_base::binary);
         svg_file << this->root.to_string();
         svg_file.close();
     }
 
-    void Graph<NumericData>::make_x_axis(NumericData data) {
-        /** Generate the x-axis (lines, ticks, labels)
-         *
-         *  @param[out] align Specifies whether labels should be
-         *                    left or center aligned wrt the bars
-         */
-
-        std::vector<std::string> x_labels = data.x_labels();
-        SVG::Group ticks, tick_text;
-        std::pair<float, float> coord;
-
-        ticks.set_attr("stroke-width", 1).set_attr("stroke", "#000000");
-        tick_text.set_attr("style", "font-family: sans-serif; font-size: 12px;")
-            .set_attr("text-anchor", "left");
-
-        // Add tick marks
-        for (float i = 0, n = data.size(); i <= n; i++) {
-            coord = x_axis->along(i/n);
-            ticks.add_child(SVG::Line(
-                coord.first, coord.first,
-                coord.second, coord.second + (float)tick_size
-            ));
-
-            // Use translate() to set location rather than x, y
-            // attributes so rotation works properly
-            SVG::Text label(0, 0, x_labels[i]);
-            label.set_attr("transform", "translate(" +
-                std::to_string(coord.first) + "," +
-                std::to_string(rect.y2 + tick_size + 10) // Space label further south from ticks
-                + ") rotate(75)");
-            tick_text.add_child(label);
-        }
-
-        this->x_axis_group->add_child(ticks, tick_text);
-    }
-
-    void Graph<CategoricalData>::make_x_axis(CategoricalData data) {
-        /** Generate the x-axis (lines, ticks, labels)
-        *
-        *  @param[out] align Specifies whether labels should be
-        *                    left or center aligned wrt the bars
-        */
-
-        SVG::Group ticks, tick_text;
-        std::pair<float, float> coord;
-
-        ticks.set_attr("stroke-width", 1).set_attr("stroke", "#000000");
-        tick_text.set_attr("style", "font-family: sans-serif; font-size: 12px;")
-            .set_attr("text-anchor", "left");
-
-        // Add tick marks
-        float n = data.size() + 1;
-        float x_tick_space = (rect.x2 - rect.x1) / data.size();
-        float tick_offset = 0; // Used for alignment
-
-        n--;
-        tick_offset += x_tick_space / 2;
-
-        for (float i = 0; i < n; i++) {
-            coord = x_axis->along(i / n);
-            ticks.add_child(SVG::Line(
-                coord.first + tick_offset, coord.first + tick_offset,
-                coord.second, coord.second + tick_size
-            ));
-
-            // Use translate() to set location rather than x, y
-            // attributes so rotation works properly
-            SVG::Text label(0, 0, data.x_values[i]);
-            label.set_attr("transform", "translate(" +
-                std::to_string(coord.first + tick_offset) + "," +
-                std::to_string(rect.y2 + tick_size + 10) // Space label further south from ticks
-                + ") rotate(75)");
-            tick_text.add_child(label);
-        }
-
-        this->x_axis_group->add_child(ticks, tick_text);
-    }
-
-    template<typename T>
-    void Graph<T>::make_y_axis(T data) {
-        std::vector<std::string> y_labels = data.y_labels(6);
-        SVG::Group ticks, tick_text;
-        std::pair<float, float> coord;
-
-        ticks.set_attr("stroke-width", 1).set_attr("stroke", "#000000");
-        tick_text.set_attr("style", "font-family: sans-serif;"
-            "font-size: 12px;").set_attr("text-anchor", "end");
-
-        // Add 6 y-axis tick marks starting from the bottom, moving upwards
-        // Ticks are represented as tiny lines
-        for (size_t i = 0; i < 6; i++) {
-            coord = y_axis->along((float)i/6);
-            ticks.add_child(SVG::Line(
-                coord.first - 5, coord.first, coord.second, coord.second));
-            tick_text.add_child(SVG::Text(coord.first - 5, coord.second, y_labels[i]));
-        }
-
-        this->y_axis_group->add_child(ticks, tick_text);
-    }
-
-    BarChart::BarChart(CategoricalData data, GraphOptions options) :
-        Graph(options) {
-        /** Set up the graph */
-        this->rect.set_data(data);
-
-        if (options.title.empty())
-            this->title->content = "Chart for " + options.x_label + " vs. " + options.y_label;
-        else
-            this->title->content = options.title;
-
-        this->xlab->content = options.x_label;
-        this->ylab->content = options.y_label;
-    }
-
-    void BarChart::generate(CategoricalData data) {
-        this->make_x_axis(data);
-        this->make_y_axis(data);
-        this->root.add_child(make_bars(data));
-    }
-
-    SVG::Group BarChart::make_bars(CategoricalData& data) {
+    SVG::Group BarChart::make_geom(CategoricalData& data) {
         /** Distribute bars evenly across graph canvas */
         SVG::Group bars;
         bars.set_attr("fill", "#004777");
         
         std::pair<float, float> coord;
+        const float max_height = rect.y2 - rect.y1;
         float x_tick_space = (rect.x2 - rect.x1) / data.size();
-        const int max_height = rect.y2 - rect.y1;
-        int temp_x1 = rect.x1;
-        double bar_height;
+        float temp_x1 = rect.x1;
+        float bar_height;
 
         // Add a bar for every bin
         for (auto it = data.y_values.begin(); it != data.y_values.end(); ++it) {
@@ -253,45 +114,40 @@ namespace Graphs {
         return bars;
     }
 
-    Scatterplot::Scatterplot(NumericData _data, GraphOptions options) :
-        data(_data), Graph(options) {
-        this->rect.set_data(data);
-        if (options.title.empty())
-            this->title->content = "Scatterplot for " +
-            options.x_label + " vs. " + options.y_label;
-        else
-            this->title->content = options.title;
-
-        this->xlab->content = options.x_label;
-        this->ylab->content = options.y_label;
-    }
-
-    void Scatterplot::generate(NumericData data) {
-        make_x_axis(data);
-        make_y_axis(data);
-        this->root.add_child(make_dots());
-    }
-
-    SVG::Group Scatterplot::make_dots(size_t dot_radius) {
+    SVG::Group Scatterplot::make_geom(NumericData& data) {
         std::pair<float, float> coord;
+        float dot_radius = 5;
+
         SVG::Group dots;
         dots.set_attr("fill", "#004777");
 
         // Add each dot
         for (size_t i = 0, ilen = data.size(); i < ilen; i++) {
+            if (!data.z_values.empty())
+                dot_radius = data.z_values[i];
+
             coord = rect.map(data.x_values[i], data.y_values[i]);
-            dots.add_child(SVG::Circle(coord.first, coord.second, dot_radius));
+            dots.add_child(SVG::Circle(coord.first, coord.second, (float)dot_radius));
         }
 
         return dots;
     }
-    
+
+    void MultiScatterplot::plot(NumericDataSet& data) {
+        rect = CartesianCoordinates(this->options, data);
+        make_x_axis(data);
+        make_y_axis(data);
+
+        for (auto it = data.datasets.begin(); it != data.datasets.end(); ++it)
+            this->root.add_child(make_geom(*it));
+    }
+
     /**
     void Matrix::add_graph(Graph graph) {
         this->graphs.push_back(graph);
     }
 
-    void Matrix::generate() {
+    void Matrix::plot() {
         // Set final width & height of SVG
         root.set_attr("width", width_per_graph * cols);
         root.set_attr("height", height_per_graph *
@@ -306,7 +162,7 @@ namespace Graphs {
             it->root.set_attr("y", current_row * height_per_graph);
             it->width = width_per_graph;
             it->height = height_per_graph;
-            it->generate();
+            it->plot();
             root.add_child(it->root);
 
             current_col++;
@@ -327,8 +183,8 @@ namespace Graphs {
         // Draw up axes
         for (double i = 0; i < axes; i++) {
             coord = polar.map((i / axes) * 2 * PI);
-            line = SVG::Line((int)polar.center().first, coord.first,
-                (int)polar.center().second, coord.second);
+            line = SVG::Line(polar.center().first, coord.first,
+                polar.center().second, coord.second);
             line.set_attr("stroke-width", 2).set_attr("stroke", "black");
 
             root.add_child(SVG::Circle(std::get<0>(coord), std::get<1>(coord), 2));
@@ -343,7 +199,7 @@ namespace Graphs {
         SVG::Line tick;
 
         for (float i = 0; i < axes; i++) {
-            for (float rad = 0.1; rad < 1; rad += 0.1) {
+            for (float rad = (float)0.1; rad < 1; rad += (float)0.1) {
                 auto left_coord = polar.map(((i / axes) * 2 * PI) - 0.5, rad);
                 auto right_coord = polar.map(((i / axes) * 2 * PI) + 0.5, rad);
 

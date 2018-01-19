@@ -125,7 +125,7 @@ namespace SVG {
     class Text : public Element {
     public:
         Text() { tag = "text"; };
-        Text(int x, int y, std::string _content) {
+        Text(float x, float y, std::string _content) {
             tag = "text";
             set_attr("x", std::to_string(x));
             set_attr("y", std::to_string(y));
@@ -143,7 +143,7 @@ namespace SVG {
     class Line : public Element {
     public:
         Line() {};
-        Line(int x1, int x2, int y1, int y2) : Element("line", {
+        Line(float x1, float x2, float y1, float y2) : Element("line", {
             { "x1", std::to_string(x1) },
             { "x2", std::to_string(x2) },
             { "y1", std::to_string(y1) },
@@ -166,7 +166,7 @@ namespace SVG {
     class Rect : public Element {
     public:
         Rect(
-            int x, int y, double width, double height) :
+            float x, float y, float width, float height) :
             Element("rect", {
                 { "x", std::to_string(x) },
                 { "y", std::to_string(y) },
@@ -177,7 +177,7 @@ namespace SVG {
 
     class Circle : public Element {
     public:
-        Circle(int cx, int cy, int radius) :
+        Circle(float cx, float cy, float radius) :
             Element("circle", {
                 { "cx", std::to_string(cx) },
                 { "cy", std::to_string(cy) },
@@ -187,83 +187,171 @@ namespace SVG {
 }
 
 namespace Graphs {
+    struct GraphOptions {
+        int width;
+        int height;
+        int margin_left;    /*< Also includes space for y-axis labels */
+        int margin_right;
+        int margin_bottom;  /*< Also includes space for x-axis labels */
+        int margin_top;     /*< Also includes space for title */
+        std::string title;
+        std::string x_label;
+        std::string y_label;
+    };
+
+    const GraphOptions DEFAULT_GRAPH = { 800, 400, 50, 50, 100, 50, "", "", "" };
+
+    /** Abstract base class for Dataset* */
+    class DatasetBase {
+    public:
+        virtual const size_t size() = 0;
+        virtual long double x_min() = 0;
+        virtual long double x_max() = 0;
+        virtual long double y_min() = 0;
+        virtual long double y_max() = 0;
+        virtual std::vector<std::string> x_labels(size_t max_labels = 20);
+        std::vector<std::string> y_labels(size_t labels=5);
+    };
+
     template <class T>
-    struct GraphData {
-        GraphData() {};
-        GraphData(const std::vector<T> x, const std::vector<long double> y) :
+    struct Dataset: public DatasetBase {
+        Dataset() {};
+        Dataset(const std::vector<T> x, const std::vector<long double> y) :
             x_values(x), y_values(y) {
             if (x.size() != y.size()) {
                 throw std::runtime_error("Number of labels does not match number of heights.");
             }
         };
 
-        inline const size_t GraphData<T>::size() { return x_values.size(); }
-        inline long double GraphData<T>::y_min() {
+        inline const size_t size() override { return x_values.size(); }
+        inline long double x_min() override { return NAN; }
+        inline long double x_max() override { return NAN; }
+        inline long double y_min() override {
             /** Return the lowest y value */
             return *(std::min_element(y_values.begin(), y_values.end()));
         }
 
-        inline long double GraphData<T>::y_max() {
+        inline long double y_max() override {
             /** Return the highest y value */
             return *(std::max_element(y_values.begin(), y_values.end()));
-        }
-
-        std::vector<std::string> y_labels(size_t labels=5) {
-            std::vector<std::string> ret_labels;
-
-            // Set bin labels to left-hand boundary values
-            for (size_t i = 0; i <= labels; i++) {
-                ret_labels.push_back(std::to_string(
-                    y_min() + i*(y_max() - y_min()) / labels));
-            }
-
-            return ret_labels;
         }
 
         std::vector<T> x_values;
         std::vector<long double> y_values;
     };
 
-    /** Data used to generate bar plots, histograms, etc. */
-    class CategoricalData : public GraphData<std::string> {
+    /** A collection of Dataset */
+    template<class T>
+    class DatasetCollection: public DatasetBase {
     public:
-        using GraphData<std::string>::GraphData;
+        DatasetCollection() {};
+        std::vector<T> datasets;
+
+        DatasetCollection<T>& operator+ (T data) {
+            /** Append data to the set */
+            datasets.push_back(data);
+            return *this;
+        }
+
+        inline const size_t size() override { 
+            if (datasets.empty())
+                return 0;
+            return datasets.begin()->size();
+        }
+
+        inline long double x_min() override { return NAN; }
+        inline long double x_max() override { return NAN; }
+        inline long double y_min() override {
+            /** Return the lowest y value in the collection of data */
+            long double min = NAN;
+            for (auto it = datasets.begin(); it != datasets.end(); ++it)
+                if (isnan(min) || it->y_min() < min) min = it->y_min();
+
+            return min;
+        }
+
+        inline long double y_max() override {
+            /** Return the largest y value in the collection of data */
+            long double max = NAN;
+            for (auto it = datasets.begin(); it != datasets.end(); ++it)
+                if (isnan(max) || it->y_max() > max) max = it->y_max();
+
+            return max;
+        }
+    };
+
+    /** Data used to plot bar plots, histograms, etc. */
+    class CategoricalData : public Dataset<std::string> {
+    public:
+        using Dataset<std::string>::Dataset;
+        using Dataset<std::string>::size;
+
+        inline std::vector<std::string> x_labels(size_t max_labels=20) override { return this->x_values;  }
         inline long double min_height() { return this->y_min(); }
         inline long double max_height() { return this->y_max(); }
     };
 
-    class NumericData : public GraphData<long double> {
+    class NumericDataSet;
+    class NumericData : public Dataset<long double> {
     public:
-        using GraphData<long double>::GraphData;
-        std::vector<std::string> x_labels(size_t max_labels = 20);
+        NumericData(
+            const std::vector<long double> x,
+            const std::vector<long double> y,
+            const std::vector<long double> z
+        );
 
-        inline long double x_min() {
+        using Dataset<long double>::Dataset;
+        using Dataset<long double>::size;
+
+        NumericDataSet operator+ (NumericData other);
+
+        inline long double x_min() override {
             /** Return the lowest x value */
             return *(std::min_element(x_values.begin(), x_values.end()));
         }
 
-        inline long double x_max() {
+        inline long double x_max() override {
             /** Return the highest x value */
             return *(std::max_element(x_values.begin(), x_values.end()));
         }
+
+        std::vector<long double> z_values = {};
     };
 
+    class NumericDataSet : public DatasetCollection<NumericData> {
+    public: using DatasetCollection<NumericData>::DatasetCollection;
+    };
 
-    /** Defines a mapping from the data space to the SVG coordinate space */
+    /** Defines a mapping from the data space to the SVG coordinate space
+     *  Having multiple data sets on the same plot involves adjusting the coordinate system
+     */
     class CartesianCoordinates {
     public:
         CartesianCoordinates() {};
+
+        // TODO: Remove
         CartesianCoordinates(float _x1, float _x2, float _y1, float _y2) :
             x1(_x1), x2(_x2), y1(_y1), y2(_y2) {};
 
+        CartesianCoordinates(const GraphOptions& options, DatasetBase& data) :
+            x1((float)options.margin_left),
+            x2((float)options.width - (float)options.margin_right),
+            y1((float)options.margin_top),
+            y2((float)options.height - (float)options.margin_bottom) {
+            domain_min = data.x_min();
+            domain_max = data.x_max();
+            range_min = data.y_min();
+            range_max = data.y_max();
+        }
+
         template<typename T>
         inline float map_x(T x) {
-            return x1 + (x2 - x1) * ((x - domain_min) / (domain_max - domain_min));
+            return (float)(x1 + (x2 - x1) * ((x - domain_min) / (domain_max - domain_min)));
         };
 
         template<typename T>
         inline float map_y(T y) {
-            return y2 - (y2 - y1) * ((y - range_min) / (range_max - range_min));
+            return (float)(y2 - (y2 - y1) * ((y - range_min) / (range_max - range_min)));
         };
 
         template<typename T>
@@ -271,9 +359,6 @@ namespace Graphs {
             float ret_x = map_x(x), ret_y = map_y(y);
             return std::make_pair(ret_x, ret_y);
         };
-
-        void set_data(CategoricalData& data);
-        void set_data(NumericData& data);
 
         float x1;
         float x2;
@@ -299,25 +384,15 @@ namespace Graphs {
         float radius;
     };
 
-    struct GraphOptions {
-        int width;
-        int height;
-        int margin_left;    /*< Also includes space for y-axis labels */
-        int margin_right;
-        int margin_bottom;  /*< Also includes space for x-axis labels */
-        int margin_top;     /*< Also includes space for title */
-        std::string title;
-        std::string x_label;
-        std::string y_label;
-    };
-
-    const GraphOptions DEFAULT_GRAPH = { 800, 400, 50, 50, 100, 50, "", "", "" };
-
     /** Base class for all plots */
-    class Plot {
+    class PlotBase {
     public:
+        PlotBase(GraphOptions _options = DEFAULT_GRAPH) : options(_options) {};
         void to_svg(const std::string filename);
+
+    protected:
         SVG::SVG root;
+        GraphOptions options;
     };
 
     /** This provides a base class for any plot that displays objects on an XY grid.
@@ -331,80 +406,23 @@ namespace Graphs {
      *
      *  T: Should be either CategoricalData or NumericData
      */
-    template<class T>
-    class Graph: public Plot {
+    template<typename T>
+    class Graph: public PlotBase {
     public:
-        Graph(GraphOptions options = DEFAULT_GRAPH) :
-            width(options.width), height(options.height) {
-            this->rect = CartesianCoordinates(
-                options.margin_left,            // x1
-                width - options.margin_right,   // x2
-                options.margin_top,             // y1
-                height - options.margin_bottom  // y2
-            );
-            this->root.set_attr("width", width).set_attr("height", height);
-
-            // Make title
-            SVG::SVG title_wrapper;
-            title_wrapper.set_attr("width", width)
-                .set_attr("height", options.margin_top);
-
-            SVG::Text title;
-            title.set_attr("x", "50%").set_attr("y", "50%")
-                .set_attr("style", "font-family: sans-serif; font-size: 24px;")
-                .set_attr("dominant-baseline", "central")
-                .set_attr("text-anchor", "middle");
-
-            // Make x-axis label;
-            SVG::SVG xlab_wrapper;
-            xlab_wrapper.set_attr("width", width).set_attr("height", 25)
-                .set_attr("x", 0).set_attr("y", height - 25);
-
-            SVG::Text xlab;
-            xlab.set_attr("x", "50%").set_attr("y", "50%")
-                .set_attr("style", "font-family: sans-serif; font-size: 16px;")
-                .set_attr("dominant-baseline", "central")
-                .set_attr("text-anchor", "middle");
-
-            // Make y-axis label
-            SVG::SVG ylab_wrapper;
-            ylab_wrapper.set_attr("width", height).set_attr("height", 25)
-                .set_attr("x", 0).set_attr("y", 0)
-                .set_attr("transform", "translate(" +
-                    std::to_string(0) + "," + std::to_string(height) +
-                    ") rotate(-90)");
-
-            SVG::Text ylab;
-            ylab.set_attr("x", "50%").set_attr("y", "50%")
-                .set_attr("style", "font-family: sans-serif; font-size: 16px;")
-                .set_attr("dominant-baseline", "central")
-                .set_attr("text-anchor", "middle");
-
-            // Make axis lines
-            this->x_axis_group = (SVG::Group*)this->root.add_child(SVG::Group());
-            this->y_axis_group = (SVG::Group*)this->root.add_child(SVG::Group());
-
-            this->x_axis = (SVG::Line*)x_axis_group->add_child(
-                SVG::Line(rect.x1, rect.x2, rect.y2, rect.y2));
-            x_axis->set_attr("stroke", "#cccccc").set_attr("stroke-width", 1);
-            this->y_axis = (SVG::Line*)y_axis_group->add_child(
-                SVG::Line(rect.x1, rect.x1, rect.y1, rect.y2));
-            y_axis->set_attr("stroke", "#cccccc").set_attr("stroke-width", 1);
-
-            // So we can dynamically change text content later
-            this->title = title_wrapper.add_child(title);
-            this->xlab = xlab_wrapper.add_child(xlab);
-            this->ylab = ylab_wrapper.add_child(ylab);
-            this->root.add_child(title_wrapper, xlab_wrapper, ylab_wrapper);
+        Graph(GraphOptions _options = DEFAULT_GRAPH);
+        inline void plot(T& data) {
+            this->rect = CartesianCoordinates(this->options, data);
+            this->make_x_axis(data);
+            this->make_y_axis(data);
+            this->root.add_child(make_geom(data));
         }
-
-        int width;
-        int height;
 
     protected:
         CartesianCoordinates rect; /*< Used to map stuff onto the drawing area */
-        void make_x_axis(T data);
-        void make_y_axis(T data);
+
+        virtual SVG::Group make_geom(T& data) = 0;
+        void make_x_axis(DatasetBase &data);
+        void make_y_axis(DatasetBase &data);
 
         int bar_spacing = 2;
         int tick_size = 5;
@@ -420,27 +438,154 @@ namespace Graphs {
         SVG::Line* y_axis = nullptr;
     };
 
-    class BarChart : public Graph<CategoricalData> {
-    public:
-        BarChart(CategoricalData Data, GraphOptions options = DEFAULT_GRAPH);
-        void generate(CategoricalData data);
+    template<class T>
+    Graph<T>::Graph(GraphOptions _options) : PlotBase(_options) {
+        int width = _options.width;
+        int height = _options.height;
 
+        this->root.set_attr("width", width).set_attr("height", height);
+
+        // Make title
+        SVG::SVG title_wrapper;
+        title_wrapper.set_attr("width", width)
+            .set_attr("height", options.margin_top);
+
+        SVG::Text title;
+        title.set_attr("x", "50%").set_attr("y", "50%")
+            .set_attr("style", "font-family: sans-serif; font-size: 24px;")
+            .set_attr("dominant-baseline", "central")
+            .set_attr("text-anchor", "middle");
+
+        // Make x-axis label;
+        SVG::SVG xlab_wrapper;
+        xlab_wrapper.set_attr("width", width).set_attr("height", 25)
+            .set_attr("x", 0).set_attr("y", height - 25);
+
+        SVG::Text xlab;
+        xlab.set_attr("x", "50%").set_attr("y", "50%")
+            .set_attr("style", "font-family: sans-serif; font-size: 16px;")
+            .set_attr("dominant-baseline", "central")
+            .set_attr("text-anchor", "middle");
+
+        // Make y-axis label
+        SVG::SVG ylab_wrapper;
+        ylab_wrapper.set_attr("width", height).set_attr("height", 25)
+            .set_attr("x", 0).set_attr("y", 0)
+            .set_attr("transform", "translate(" +
+                std::to_string(0) + "," + std::to_string(height) +
+                ") rotate(-90)");
+
+        SVG::Text ylab;
+        ylab.set_attr("x", "50%").set_attr("y", "50%")
+            .set_attr("style", "font-family: sans-serif; font-size: 16px;")
+            .set_attr("dominant-baseline", "central")
+            .set_attr("text-anchor", "middle");
+
+        // So we can dynamically change text content later
+        this->title = title_wrapper.add_child(title);
+        this->xlab = xlab_wrapper.add_child(xlab);
+        this->ylab = ylab_wrapper.add_child(ylab);
+        this->root.add_child(title_wrapper, xlab_wrapper, ylab_wrapper);
+
+        this->title->content = options.title;
+        this->xlab->content = options.x_label;
+        this->ylab->content = options.y_label;
+    }
+
+    template<class T>
+    void Graph<T>::make_x_axis(DatasetBase &data) {
+        /** plot the x-axis (lines, ticks, labels)
+        *
+        *  @param[out] align Specifies whether labels should be
+        *                    left or center aligned wrt the bars
+        */
+
+        this->x_axis_group = (SVG::Group*)this->root.add_child(SVG::Group());
+        this->x_axis = (SVG::Line*)x_axis_group->add_child(
+            SVG::Line(rect.x1, rect.x2, rect.y2, rect.y2));
+        x_axis->set_attr("stroke", "#cccccc").set_attr("stroke-width", 1);
+
+        std::vector<std::string> x_labels = data.x_labels();
+        SVG::Group ticks, tick_text;
+        std::pair<float, float> coord;
+
+        ticks.set_attr("stroke-width", 1).set_attr("stroke", "#000000");
+        tick_text.set_attr("style", "font-family: sans-serif; font-size: 12px;")
+            .set_attr("text-anchor", "left");
+
+        // Labels for numeric data always have n + 1 labels
+        // Use offset to center text
+        float offset = offset = 0.5/(float)data.size();
+        if (x_labels.size() > data.size())
+            offset = 0;
+
+        // Add tick marks
+        for (float i = 0, n = (float)data.size(); i <= n; i++) {
+            if (x_labels.size() == i)
+                break;
+
+            coord = x_axis->along(i / n + offset);
+            ticks.add_child(SVG::Line(
+                coord.first, coord.first,
+                coord.second, coord.second + (float)tick_size
+            ));
+
+            // Use translate() to set location rather than x, y
+            // attributes so rotation works properly
+            SVG::Text label(0, 0, x_labels[i]);
+            label.set_attr("transform", "translate(" +
+                std::to_string(coord.first) + "," +
+                std::to_string(rect.y2 + tick_size + 10) // Space label further south from ticks
+                + ") rotate(75)");
+            tick_text.add_child(label);
+        }
+
+        this->x_axis_group->add_child(ticks, tick_text);
+    }
+
+    template <class T>
+    void Graph<T>::make_y_axis(DatasetBase &data) {
+        this->y_axis_group = (SVG::Group*)this->root.add_child(SVG::Group());
+        this->y_axis = (SVG::Line*)y_axis_group->add_child(
+            SVG::Line(rect.x1, rect.x1, rect.y1, rect.y2));
+        y_axis->set_attr("stroke", "#cccccc").set_attr("stroke-width", 1);
+
+        std::vector<std::string> y_labels = data.y_labels(6);
+        SVG::Group ticks, tick_text;
+        std::pair<float, float> coord;
+
+        ticks.set_attr("stroke-width", 1).set_attr("stroke", "#000000");
+        tick_text.set_attr("style", "font-family: sans-serif;"
+            "font-size: 12px;").set_attr("text-anchor", "end");
+
+        // Add 6 y-axis tick marks starting from the bottom, moving upwards
+        // Ticks are represented as tiny lines
+        for (size_t i = 0; i < 6; i++) {
+            coord = y_axis->along((float)i / 6);
+            ticks.add_child(SVG::Line(
+                coord.first - 5, coord.first, coord.second, coord.second));
+            tick_text.add_child(SVG::Text(coord.first - 5, coord.second, y_labels[i]));
+        }
+
+        this->y_axis_group->add_child(ticks, tick_text);
+    }
+
+    class BarChart : public Graph<CategoricalData> {
     protected:
-        SVG::Group make_bars(CategoricalData& data);
-        SVG::Group bars;
+        SVG::Group make_geom(CategoricalData& data) override;
     };
 
     class Scatterplot : public Graph<NumericData> {
-    public:
-        Scatterplot(NumericData data, GraphOptions options = DEFAULT_GRAPH);
-        void generate(NumericData data);
-
     protected:
-        NumericData data;
-        SVG::Group make_dots(const size_t dot_radius=2);
+        SVG::Group make_geom(NumericData& data) override;
     };
 
-    class RadarChart : public Plot {
+    class MultiScatterplot : public Scatterplot {
+    public:
+        void plot(NumericDataSet& data);
+    };
+
+    class RadarChart : public PlotBase {
     public:
         RadarChart(size_t axes);
         void plot_points(vector<float> percentages);
@@ -458,7 +603,7 @@ namespace Graphs {
     public:
         Matrix(int _cols) : cols(_cols) {};
         void add_graph(Graph graph);
-        void generate();
+        void plot();
 
     private:
         std::deque<Graph> graphs;
