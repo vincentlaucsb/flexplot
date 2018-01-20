@@ -1,8 +1,8 @@
 #pragma once
 #include <iostream>
 #include <algorithm> // min, max
-#include <fstream> // ofstream
-#include <math.h>  // NAN
+#include <fstream>   // ofstream
+#include <math.h>    // NAN
 #include <unordered_map>
 #include <map>
 #include <deque>
@@ -165,6 +165,7 @@ namespace SVG {
 
     class Rect : public Element {
     public:
+        Rect() {};
         Rect(
             float x, float y, float width, float height) :
             Element("rect", {
@@ -177,16 +178,28 @@ namespace SVG {
 
     class Circle : public Element {
     public:
+        Circle() {};
+
         Circle(float cx, float cy, float radius) :
             Element("circle", {
                 { "cx", std::to_string(cx) },
                 { "cy", std::to_string(cy) },
                 { "r", std::to_string(radius) }
-            }) {};
+            }) {
+        };
+
+        Circle(std::pair<float, float> xy, float radius) : Circle(xy.first, xy.second, radius) {
+        };
     };
 }
 
 namespace Graphs {
+    const std::vector<std::string> QUALITATIVE_COLORS = {
+        "#a6cee3", "#1f78b4", "#b2df8a", "#33a02c",
+        "#fb9a99", "#e31a1c", "#fdbf6f", "#ff7f00",
+        "#cab2d6", "#6a3d9a", "#ffff99", "#b1592"
+    };
+
     struct GraphOptions {
         int width;
         int height;
@@ -199,7 +212,8 @@ namespace Graphs {
         std::string y_label;
     };
 
-    const GraphOptions DEFAULT_GRAPH = { 800, 400, 50, 50, 100, 50, "", "", "" };
+    const GraphOptions DEFAULT_GRAPH = { 800, 400, 100, 50, 100, 50, "", "", "" };
+    const GraphOptions DEFAULT_GRAPH_LEGEND = { 800, 400, 100, 200, 100, 50, "", "", "" };
 
     /** Abstract base class for Dataset* */
     class DatasetBase {
@@ -247,7 +261,7 @@ namespace Graphs {
         DatasetCollection() {};
         std::vector<T> datasets;
 
-        DatasetCollection<T>& operator+ (T data) {
+        DatasetCollection<T>& operator+ (T& data) {
             /** Append data to the set */
             datasets.push_back(data);
             return *this;
@@ -291,7 +305,6 @@ namespace Graphs {
         inline long double max_height() { return this->y_max(); }
     };
 
-    class NumericDataSet;
     class NumericData : public Dataset<long double> {
     public:
         NumericData(
@@ -303,7 +316,7 @@ namespace Graphs {
         using Dataset<long double>::Dataset;
         using Dataset<long double>::size;
 
-        NumericDataSet operator+ (NumericData other);
+        DatasetCollection<NumericData> operator+ (NumericData& other);
 
         inline long double x_min() override {
             /** Return the lowest x value */
@@ -318,21 +331,12 @@ namespace Graphs {
         std::vector<long double> z_values = {};
     };
 
-    class NumericDataSet : public DatasetCollection<NumericData> {
-    public: using DatasetCollection<NumericData>::DatasetCollection;
-    };
-
     /** Defines a mapping from the data space to the SVG coordinate space
      *  Having multiple data sets on the same plot involves adjusting the coordinate system
      */
     class CartesianCoordinates {
     public:
         CartesianCoordinates() {};
-
-        // TODO: Remove
-        CartesianCoordinates(float _x1, float _x2, float _y1, float _y2) :
-            x1(_x1), x2(_x2), y1(_y1), y2(_y2) {};
-
         CartesianCoordinates(const GraphOptions& options, DatasetBase& data) :
             x1((float)options.margin_left),
             x2((float)options.width - (float)options.margin_right),
@@ -378,10 +382,10 @@ namespace Graphs {
             x(cx), y(cy), radius(cr) {};
         std::pair<float, float> map(float degrees, float percent = 1);
         std::pair<float, float> center();
+        float radius;
     private:
         float x;
         float y;
-        float radius;
     };
 
     /** Base class for all plots */
@@ -393,6 +397,20 @@ namespace Graphs {
     protected:
         SVG::SVG root;
         GraphOptions options;
+    };
+
+    /** Container for a vertically-oriented legend */
+    class Legend {
+    public:
+        Legend() {};
+
+        std::vector<std::string> fills;
+        std::vector<std::string> labels;
+
+        void generate();
+        float get_height();
+
+        SVG::SVG root;
     };
 
     /** This provides a base class for any plot that displays objects on an XY grid.
@@ -420,7 +438,10 @@ namespace Graphs {
     protected:
         CartesianCoordinates rect; /*< Used to map stuff onto the drawing area */
 
-        virtual SVG::Group make_geom(T& data) = 0;
+        virtual SVG::Group make_geom(
+            T& data,
+            const std::string color = QUALITATIVE_COLORS[0]
+        ) = 0;
         void make_x_axis(DatasetBase &data);
         void make_y_axis(DatasetBase &data);
 
@@ -545,12 +566,13 @@ namespace Graphs {
 
     template <class T>
     void Graph<T>::make_y_axis(DatasetBase &data) {
+        const size_t num_labels = 10;
         this->y_axis_group = (SVG::Group*)this->root.add_child(SVG::Group());
         this->y_axis = (SVG::Line*)y_axis_group->add_child(
             SVG::Line(rect.x1, rect.x1, rect.y1, rect.y2));
         y_axis->set_attr("stroke", "#cccccc").set_attr("stroke-width", 1);
 
-        std::vector<std::string> y_labels = data.y_labels(6);
+        std::vector<std::string> y_labels = data.y_labels(10);
         SVG::Group ticks, tick_text;
         std::pair<float, float> coord;
 
@@ -558,10 +580,10 @@ namespace Graphs {
         tick_text.set_attr("style", "font-family: sans-serif;"
             "font-size: 12px;").set_attr("text-anchor", "end");
 
-        // Add 6 y-axis tick marks starting from the bottom, moving upwards
+        // Add 10 y-axis tick marks starting from the bottom, moving upwards
         // Ticks are represented as tiny lines
-        for (size_t i = 0; i < 6; i++) {
-            coord = y_axis->along((float)i / 6);
+        for (size_t i = 0; i < num_labels; i++) {
+            coord = y_axis->along((float)(num_labels - i) / num_labels);
             ticks.add_child(SVG::Line(
                 coord.first - 5, coord.first, coord.second, coord.second));
             tick_text.add_child(SVG::Text(coord.first - 5, coord.second, y_labels[i]));
@@ -572,26 +594,36 @@ namespace Graphs {
 
     class BarChart : public Graph<CategoricalData> {
     protected:
-        SVG::Group make_geom(CategoricalData& data) override;
+        SVG::Group make_geom(CategoricalData& data,
+            const std::string color = QUALITATIVE_COLORS[0]) override;
     };
 
     class Scatterplot : public Graph<NumericData> {
+    public:
+        using Graph<NumericData>::Graph;
     protected:
-        SVG::Group make_geom(NumericData& data) override;
+        SVG::Group make_geom(NumericData& data,
+            const std::string color = QUALITATIVE_COLORS[0]) override;
     };
 
     class MultiScatterplot : public Scatterplot {
     public:
-        void plot(NumericDataSet& data);
+        MultiScatterplot(GraphOptions options = DEFAULT_GRAPH_LEGEND)
+            : Scatterplot(options) {};
+        void plot(DatasetCollection<NumericData>& data);
+
+    protected:
+        std::vector<SVG::Group*> dot_groups;
+        void make_legend();
     };
 
     class RadarChart : public PlotBase {
     public:
         RadarChart(size_t axes);
-        void plot_points(vector<float> percentages);
+        void plot(vector<float> percentages);
     private:
         PolarCoordinates polar = { 250, 250, 250 };
-        void make_axis(size_t axes);
+        void make_grid(size_t lines=10);
 
         size_t n_axes;
         std::vector<SVG::Line*> axes;

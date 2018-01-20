@@ -92,10 +92,39 @@ namespace Graphs {
         svg_file.close();
     }
 
-    SVG::Group BarChart::make_geom(CategoricalData& data) {
+    float Legend::get_height() {
+        return this->fills.size() * 30;
+    }
+
+    void Legend::generate() {
+        // TODO: Make this nicer (or not)
+        this->root.set_attr("font-size", "14.5px")
+            .set_attr("font-family", "sans-serif");
+
+        SVG::SVG label_container;
+        SVG::Rect guide;
+        SVG::Text label;
+        float y = 0;
+
+        for (size_t i = 0; i < this->fills.size(); i++) {
+            label_container = SVG::SVG();
+            label_container.set_attr("y", y);
+
+            guide = SVG::Rect(0, 5, 20, 20);
+            guide.set_attr("fill", fills[i]);
+            label = SVG::Text(30, 15, this->labels[i]);
+            label.set_attr("dominant-baseline", "central");
+
+            label_container.add_child(guide, label);
+            this->root.add_child(label_container);
+            y += 30;
+        }
+    }
+
+    SVG::Group BarChart::make_geom(CategoricalData& data, const std::string color) {
         /** Distribute bars evenly across graph canvas */
         SVG::Group bars;
-        bars.set_attr("fill", "#004777");
+        bars.set_attr("fill", color);
         
         std::pair<float, float> coord;
         const float max_height = rect.y2 - rect.y1;
@@ -114,12 +143,11 @@ namespace Graphs {
         return bars;
     }
 
-    SVG::Group Scatterplot::make_geom(NumericData& data) {
+    SVG::Group Scatterplot::make_geom(NumericData& data, const std::string color) {
         std::pair<float, float> coord;
-        float dot_radius = 5;
-
+        float dot_radius = 2;
         SVG::Group dots;
-        dots.set_attr("fill", "#004777");
+        dots.set_attr("fill", color);
 
         // Add each dot
         for (size_t i = 0, ilen = data.size(); i < ilen; i++) {
@@ -133,13 +161,44 @@ namespace Graphs {
         return dots;
     }
 
-    void MultiScatterplot::plot(NumericDataSet& data) {
+    void MultiScatterplot::plot(DatasetCollection<NumericData>& data) {
+        SVG::Group* grp_ptr;
+        auto color = QUALITATIVE_COLORS.begin();
         rect = CartesianCoordinates(this->options, data);
         make_x_axis(data);
         make_y_axis(data);
 
-        for (auto it = data.datasets.begin(); it != data.datasets.end(); ++it)
-            this->root.add_child(make_geom(*it));
+        for (auto it = data.datasets.begin(); it != data.datasets.end(); ++it) {
+            if (color == QUALITATIVE_COLORS.end())
+                color = QUALITATIVE_COLORS.begin();
+
+            grp_ptr = (SVG::Group*)this->root.add_child(make_geom(*it, *color));
+            this->dot_groups.push_back(grp_ptr);
+            ++color;
+        }
+
+        make_legend();
+    }
+
+    void MultiScatterplot::make_legend() {
+        // TODO: Make this less atrocious
+        Legend legend;
+
+        std::vector<std::string> labels;
+        std::vector<std::string> fills;
+
+        for (size_t i = 1; i <= dot_groups.size(); i++) {
+            labels.push_back("Group " + std::to_string(i));
+            fills.push_back(dot_groups[i - 1]->attr["fill"]);
+        }
+
+        legend.labels = labels;
+        legend.fills = fills;
+        legend.generate();
+
+        legend.root.set_attr("x", rect.x2 + 10);
+        legend.root.set_attr("y", (rect.y2 - legend.get_height()) / 2);
+        this->root.add_child(legend.root);
     }
 
     /**
@@ -186,36 +245,27 @@ namespace Graphs {
             line = SVG::Line(polar.center().first, coord.first,
                 polar.center().second, coord.second);
             line.set_attr("stroke-width", 2).set_attr("stroke", "black");
-
-            root.add_child(SVG::Circle(std::get<0>(coord), std::get<1>(coord), 2));
             this->axes.push_back((SVG::Line*)root.add_child(line));
         }
 
-        // this->make_axis(axes);
+        this->make_grid();
     }
 
-    void RadarChart::make_axis(size_t axes) {
-        /** Add tick marks to all axes */
-        SVG::Line tick;
+    void RadarChart::make_grid(size_t lines) {
+        /** Add a circular "grid" */
+        SVG::Group grid;
+        SVG::Circle line;
+        grid.set_attr("fill", "none")
+            .set_attr("stroke", "#cccccc")
+            .set_attr("stroke-width", 1);
 
-        for (float i = 0; i < axes; i++) {
-            for (float rad = (float)0.1; rad < 1; rad += (float)0.1) {
-                auto left_coord = polar.map(((i / axes) * 2 * PI) - 0.5, rad);
-                auto right_coord = polar.map(((i / axes) * 2 * PI) + 0.5, rad);
+        for (float i = 0; i <= lines; i++)
+            grid.add_child(SVG::Circle(polar.center(), polar.radius * i / lines));
 
-                tick = SVG::Line(
-                    left_coord.first, right_coord.first,
-                    left_coord.second, right_coord.second
-                );
-
-                tick.set_attr("stroke", "black");
-                tick.set_attr("stroke-width", 2);
-                root.add_child(tick);
-            }
-        }
+        root.add_child(grid);
     }
 
-    void RadarChart::plot_points(vector<float> percentages) {
+    void RadarChart::plot(vector<float> percentages) {
         /** Plot each of the percentages on an axis on the radar chart */
         if (percentages.size() != n_axes)
             throw std::runtime_error("Expected " + std::to_string(n_axes) + "data points"

@@ -66,9 +66,9 @@ namespace Graphs {
         return max;
     }
 
-    NumericDataSet NumericData::operator+ (NumericData other) {
+    DatasetCollection<NumericData> NumericData::operator+ (NumericData& other) {
         /** Append data to the set */
-        NumericDataSet ret;
+        DatasetCollection<NumericData> ret;
         ret.datasets.push_back(*this);
         ret.datasets.push_back(other);
         return ret;

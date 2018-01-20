@@ -27,42 +27,36 @@ TEST_CASE("Bubble Plot Test", "[test_bubble]") {
     plot.to_svg("test_bubble.svg");
 }
 
-TEST_CASE("Multi-BubblePlot Test", "[test_multibubble]") {
-    NumericDataSet point_set;
-    NumericData points1 = {
-        std::vector<long double>({ 1, 2, 3, 4, 5 }),
-        std::vector<long double>({ 1, 2, 3, 4, 5 }),
-        std::vector<long double>({ 10, 20, 30, 40, 50 })
-    };
-
-    NumericData points2 = {
-        std::vector<long double>({ 10, 20, 15, 2, 0 }),
-        std::vector<long double>({ 1, 3, 4, 5, 6 }),
-        std::vector<long double>({ 10, 20, 30, 40, 50 })
-    };
-
-    point_set = points1 + points2;
-
-    MultiScatterplot plot;
-    plot.plot(point_set);
-    plot.to_svg("test_multibubble.svg");
-}
-
 TEST_CASE("Multi-Scatterplot Test", "[test_multiscatter]") {
-    NumericDataSet point_set;
+    GraphOptions options = DEFAULT_GRAPH_LEGEND;
+    options.title = "My Graph";
+    options.x_label = "x-axis Label";
+    options.y_label = "y-axis Label";
+
+    DatasetCollection<NumericData> point_set;
     NumericData points1 = {
         std::vector<long double>({ 1, 2, 3, 4, 5 }),
         std::vector<long double>({ 1, 2, 3, 4, 5 })
     };
 
     NumericData points2 = {
-        std::vector<long double>({ 10, 20, 15, 2, 0 }),
-        std::vector<long double>({ 1, 3, 4, 5, 6 })
+        std::vector<long double>({ -5, 1, 2, 4, 5 }),
+        std::vector<long double>({ 1, 2, 3, 4, 5 })
     };
 
-    point_set = points1 + points2;
+    NumericData points3 = {
+        std::vector<long double>({ 1, 5, 7, 10, 13 }),
+        std::vector<long double>({ 2, 3, 5, 7, 9 })
+    };
 
-    MultiScatterplot plot;
+    NumericData points4 = {
+        std::vector<long double>({ 1.5, 2.5, 3.5, 4.5, 5.5 }),
+        std::vector<long double>({ 1.5, 2.5, 3.5, 4.5, 5.5 })
+    };
+
+    point_set = points1 + points2 + points3 + points4;
+
+    MultiScatterplot plot(options);
     plot.plot(point_set);
     plot.to_svg("test_multiscatter.svg");
 }
@@ -82,6 +76,6 @@ TEST_CASE("Radar Chart Test", "[test_radar]") {
     std::vector<float> pct = { (float)0.1, (float)0.2, (float)0.3, (float)0.4, (float)0.5 };
 
     RadarChart plot(5);
-    plot.plot_points(pct);
+    plot.plot(pct);
     plot.to_svg("test_radar.svg");
 }
