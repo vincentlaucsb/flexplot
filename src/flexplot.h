@@ -112,6 +112,10 @@ namespace SVG {
                 " " + std::to_string(y);
         }
 
+        inline void line_to(std::pair<float, float> coord) {
+            this->line_to(coord.first, coord.second);
+        }
+
         inline void to_origin() {
             /** Draw a line back to the origin */
             this->line_to(x_start, y_start);
@@ -428,20 +432,20 @@ namespace Graphs {
     class Graph: public PlotBase {
     public:
         Graph(GraphOptions _options = DEFAULT_GRAPH);
+        
+        SVG::Group make_bar(T& data, const std::string color = QUALITATIVE_COLORS[0]);
+        SVG::Group make_point(T& data, const std::string color = QUALITATIVE_COLORS[0]);
+        SVG::Path make_line(T& data, const std::string color = QUALITATIVE_COLORS[0]);
+
         inline void plot(T& data) {
             this->rect = CartesianCoordinates(this->options, data);
             this->make_x_axis(data);
             this->make_y_axis(data);
-            this->root.add_child(make_geom(data));
         }
 
     protected:
         CartesianCoordinates rect; /*< Used to map stuff onto the drawing area */
 
-        virtual SVG::Group make_geom(
-            T& data,
-            const std::string color = QUALITATIVE_COLORS[0]
-        ) = 0;
         void make_x_axis(DatasetBase &data);
         void make_y_axis(DatasetBase &data);
 
@@ -592,30 +596,121 @@ namespace Graphs {
         this->y_axis_group->add_child(ticks, tick_text);
     }
 
-    class BarChart : public Graph<CategoricalData> {
-    protected:
-        SVG::Group make_geom(CategoricalData& data,
-            const std::string color = QUALITATIVE_COLORS[0]) override;
-    };
+    template<>
+    inline SVG::Group Graph<CategoricalData>::make_bar(
+        CategoricalData& data, const std::string color) {
+        /** Distribute bars evenly across graph canvas */
+        SVG::Group bars;
+        bars.set_attr("fill", color);
 
-    class Scatterplot : public Graph<NumericData> {
-    public:
-        using Graph<NumericData>::Graph;
-    protected:
-        SVG::Group make_geom(NumericData& data,
-            const std::string color = QUALITATIVE_COLORS[0]) override;
-    };
+        std::pair<float, float> coord;
+        const float max_height = rect.y2 - rect.y1;
+        float x_tick_space = (rect.x2 - rect.x1) / data.size();
+        float temp_x1 = rect.x1;
+        float bar_height;
 
-    class MultiScatterplot : public Scatterplot {
+        // Add a bar for every bin
+        for (auto it = data.y_values.begin(); it != data.y_values.end(); ++it) {
+            bar_height = (*it / (rect.range_max - rect.range_min)) * (rect.y2 - rect.y1);
+            bars.add_child(SVG::Rect(temp_x1, rect.y2 - bar_height,
+                x_tick_space - bar_spacing, bar_height));
+            temp_x1 += x_tick_space;
+        }
+
+        // Temporary
+        this->root.add_child(bars);
+        return bars;
+    }
+
+    template<class T>
+    inline SVG::Group Graph<T>::make_point(T& data, const std::string color) {
+        std::pair<float, float> coord;
+        float dot_radius = 2;
+        SVG::Group dots;
+        dots.set_attr("fill", color);
+
+        // Add each dot
+        for (size_t i = 0, ilen = data.size(); i < ilen; i++) {
+            if (!data.z_values.empty())
+                dot_radius = data.z_values[i];
+
+            coord = rect.map(data.x_values[i], data.y_values[i]);
+            dots.add_child(SVG::Circle(coord.first, coord.second, (float)dot_radius));
+        }
+
+        // Temporary
+        this->root.add_child(dots);
+        return dots;
+    }
+
+    template<class T>
+    inline SVG::Path Graph<T>::make_line(T& data, const std::string color) {
+        SVG::Path line;
+        std::pair<float, float> coord;
+
+        for (size_t i = 0, ilen = data.size(); i < ilen; i++) {
+            coord = rect.map(data.x_values[i], data.y_values[i]);
+            line.line_to(coord);
+        }
+
+        // Temporary
+        this->root.add_child(line);
+        return line;
+    }
+
+    template<class T>
+    class MultiGraph : public Graph<T> {
     public:
-        MultiScatterplot(GraphOptions options = DEFAULT_GRAPH_LEGEND)
-            : Scatterplot(options) {};
-        void plot(DatasetCollection<NumericData>& data);
+        MultiGraph(GraphOptions options = DEFAULT_GRAPH_LEGEND)
+            : Graph<T>(options) {};
+        void plot(DatasetCollection<T>& data);
 
     protected:
         std::vector<SVG::Group*> dot_groups;
         void make_legend();
     };
+
+    template<class T>
+    void MultiGraph<T>::plot(DatasetCollection<T>& data) {
+        SVG::Group* grp_ptr;
+        auto color = QUALITATIVE_COLORS.begin();
+        rect = CartesianCoordinates(this->options, data);
+        make_x_axis(data);
+        make_y_axis(data);
+
+        for (auto it = data.datasets.begin(); it != data.datasets.end(); ++it) {
+            if (color == QUALITATIVE_COLORS.end())
+                color = QUALITATIVE_COLORS.begin();
+
+            grp_ptr = (SVG::Group*)this->root.add_child(make_point(*it, *color));
+            this->dot_groups.push_back(grp_ptr);
+            ++color;
+        }
+
+        make_legend();
+    }
+
+    template<class T>
+    void MultiGraph<T>::make_legend() {
+        // TODO: Make this less atrocious
+        Legend legend;
+
+        std::vector<std::string> labels;
+        std::vector<std::string> fills;
+
+        for (size_t i = 1; i <= dot_groups.size(); i++) {
+            labels.push_back("Group " + std::to_string(i));
+            fills.push_back(dot_groups[i - 1]->attr["fill"]);
+        }
+
+        legend.labels = labels;
+        legend.fills = fills;
+        legend.generate();
+
+        legend.root.set_attr("x", rect.x2 + 10);
+        legend.root.set_attr("y", (rect.y2 - legend.get_height()) / 2);
+        this->root.add_child(legend.root);
+    }
 
     class RadarChart : public PlotBase {
     public:

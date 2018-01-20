@@ -10,8 +10,10 @@ TEST_CASE("Scatterplot Test", "[test_scatter]") {
         std::vector<long double>({ 1, 2, 3, 4, 5 }),
     };
 
-    Scatterplot plot;
+    Graph<NumericData> plot;
     plot.plot(points);
+    plot.make_point(points);
+    plot.make_line(points);
     plot.to_svg("test_scatter.svg");
 }
 
@@ -22,8 +24,9 @@ TEST_CASE("Bubble Plot Test", "[test_bubble]") {
         std::vector<long double>({ 10, 20, 30, 40, 50 })
     };
 
-    Scatterplot plot;
+    Graph<NumericData> plot;
     plot.plot(points);
+    plot.make_point(points);
     plot.to_svg("test_bubble.svg");
 }
 
@@ -56,8 +59,9 @@ TEST_CASE("Multi-Scatterplot Test", "[test_multiscatter]") {
 
     point_set = points1 + points2 + points3 + points4;
 
-    MultiScatterplot plot(options);
+    MultiGraph<NumericData> plot(options);
     plot.plot(point_set);
+    plot.make_point(points1);
     plot.to_svg("test_multiscatter.svg");
 }
 
@@ -67,8 +71,9 @@ TEST_CASE("Bar Chart Test", "[test_bar]") {
         std::vector<long double>({ 1, 2.5, 5, 10, 100 }),
     };
 
-    BarChart plot;
+    Graph<CategoricalData> plot;
     plot.plot(data);
+    plot.make_bar(data);
     plot.to_svg("test_bar.svg");
 }
 
