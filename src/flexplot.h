@@ -59,10 +59,10 @@ namespace SVG {
         virtual std::string to_string();
         std::map < std::string, std::string > attr;
         std::string content;
+        std::vector<std::shared_ptr<Element>> children;
 
     protected:
         std::string tag;
-        std::vector<std::shared_ptr<Element>> children;
     };
 
     template<>
@@ -211,13 +211,10 @@ namespace Graphs {
         int margin_right;
         int margin_bottom;  /*< Also includes space for x-axis labels */
         int margin_top;     /*< Also includes space for title */
-        std::string title;
-        std::string x_label;
-        std::string y_label;
     };
 
-    const GraphOptions DEFAULT_GRAPH = { 800, 400, 100, 50, 100, 50, "", "", "" };
-    const GraphOptions DEFAULT_GRAPH_LEGEND = { 800, 400, 100, 200, 100, 50, "", "", "" };
+    const GraphOptions DEFAULT_GRAPH = { 800, 400, 100, 50, 100, 50 };
+    const GraphOptions DEFAULT_GRAPH_LEGEND = { 800, 400, 100, 200, 100, 50 };
 
     /** Abstract base class for Dataset* */
     class DatasetBase {
@@ -228,7 +225,7 @@ namespace Graphs {
         virtual long double y_min() = 0;
         virtual long double y_max() = 0;
         virtual std::vector<std::string> x_labels(size_t max_labels = 20);
-        std::vector<std::string> y_labels(size_t labels=5);
+        virtual std::vector<std::string> y_labels(size_t labels=5);
     };
 
     template <class T>
@@ -245,8 +242,10 @@ namespace Graphs {
         inline long double x_min() override { return NAN; }
         inline long double x_max() override { return NAN; }
         inline long double y_min() override {
-            /** Return the lowest y value */
-            return *(std::min_element(y_values.begin(), y_values.end()));
+            /** Return the lowest y value or 0 */
+            long double min = *(std::min_element(y_values.begin(), y_values.end()));
+            if (min > 0) return 0;
+            return min;
         }
 
         inline long double y_max() override {
@@ -254,6 +253,7 @@ namespace Graphs {
             return *(std::max_element(y_values.begin(), y_values.end()));
         }
 
+        std::string name = "";
         std::vector<T> x_values;
         std::vector<long double> y_values;
     };
@@ -271,6 +271,8 @@ namespace Graphs {
             return *this;
         }
 
+        std::vector<std::string> x_labels(size_t max_labels = 20) override;
+
         inline const size_t size() override { 
             if (datasets.empty())
                 return 0;
@@ -281,7 +283,7 @@ namespace Graphs {
         inline long double x_max() override { return NAN; }
         inline long double y_min() override {
             /** Return the lowest y value in the collection of data */
-            long double min = NAN;
+            long double min = 0; // Always set 0 as the lowest unless there's a lower number
             for (auto it = datasets.begin(); it != datasets.end(); ++it)
                 if (isnan(min) || it->y_min() < min) min = it->y_min();
 
@@ -304,7 +306,8 @@ namespace Graphs {
         using Dataset<std::string>::Dataset;
         using Dataset<std::string>::size;
 
-        inline std::vector<std::string> x_labels(size_t max_labels=20) override { return this->x_values;  }
+        DatasetCollection<CategoricalData> operator+ (CategoricalData& other);
+        inline std::vector<std::string> x_labels(size_t max_labels=20) override { return this->x_values; }
         inline long double min_height() { return this->y_min(); }
         inline long double max_height() { return this->y_max(); }
     };
@@ -338,6 +341,7 @@ namespace Graphs {
     /** Defines a mapping from the data space to the SVG coordinate space
      *  Having multiple data sets on the same plot involves adjusting the coordinate system
      */
+    template<class Data>
     class CartesianCoordinates {
     public:
         CartesianCoordinates() {};
@@ -352,15 +356,8 @@ namespace Graphs {
             range_max = data.y_max();
         }
 
-        template<typename T>
-        inline float map_x(T x) {
-            return (float)(x1 + (x2 - x1) * ((x - domain_min) / (domain_max - domain_min)));
-        };
-
-        template<typename T>
-        inline float map_y(T y) {
-            return (float)(y2 - (y2 - y1) * ((y - range_min) / (range_max - range_min)));
-        };
+        inline float map_x(float x);
+        inline float map_y(float x);
 
         template<typename T>
         inline std::pair<float, float> map(T x, T y) {
@@ -377,6 +374,16 @@ namespace Graphs {
         long double domain_max = NAN;
         long double range_min = NAN;
         long double range_max = NAN;
+    };
+
+    template<class Data>
+    inline float CartesianCoordinates<Data>::map_x(float x) {
+        return (float)(x1 + (x2 - x1) * ((x - domain_min) / (domain_max - domain_min)));
+    };
+
+    template<class Data>
+    inline float CartesianCoordinates<Data>::map_y(float y) {
+        return (float)(y2 - (y2 - y1) * ((y - range_min) / (range_max - range_min)));
     };
 
     /** Defines a mapping from polar coordinates to the SVG coordinate space */
@@ -429,22 +436,34 @@ namespace Graphs {
      *  T: Should be either CategoricalData or NumericData
      */
     template<typename T>
-    class Graph: public PlotBase {
+    class Graph : public PlotBase {
     public:
         Graph(GraphOptions _options = DEFAULT_GRAPH);
-        
-        SVG::Group make_bar(T& data, const std::string color = QUALITATIVE_COLORS[0]);
-        SVG::Group make_point(T& data, const std::string color = QUALITATIVE_COLORS[0]);
+
+        SVG::SVG* make_bar(T& data, const std::string color = QUALITATIVE_COLORS[0]);
+        SVG::SVG* make_point(T& data, const std::string color = QUALITATIVE_COLORS[0]);
         SVG::Path make_line(T& data, const std::string color = QUALITATIVE_COLORS[0]);
 
         inline void plot(T& data) {
-            this->rect = CartesianCoordinates(this->options, data);
+            this->rect = CartesianCoordinates<T>(this->options, data);
             this->make_x_axis(data);
             this->make_y_axis(data);
         }
 
+        inline void set_title(const std::string title) {
+            this->title->content = title;
+        }
+
+        void set_x_label(const std::string x_lab) {
+            this->xlab->content = x_lab;
+        }
+
+        void set_y_label(const std::string y_lab) {
+            this->ylab->content = y_lab;
+        }
+
     protected:
-        CartesianCoordinates rect; /*< Used to map stuff onto the drawing area */
+        CartesianCoordinates<T> rect; /*< Used to map stuff onto the drawing area */
 
         void make_x_axis(DatasetBase &data);
         void make_y_axis(DatasetBase &data);
@@ -511,10 +530,6 @@ namespace Graphs {
         this->xlab = xlab_wrapper.add_child(xlab);
         this->ylab = ylab_wrapper.add_child(ylab);
         this->root.add_child(title_wrapper, xlab_wrapper, ylab_wrapper);
-
-        this->title->content = options.title;
-        this->xlab->content = options.x_label;
-        this->ylab->content = options.y_label;
     }
 
     template<class T>
@@ -590,17 +605,17 @@ namespace Graphs {
             coord = y_axis->along((float)(num_labels - i) / num_labels);
             ticks.add_child(SVG::Line(
                 coord.first - 5, coord.first, coord.second, coord.second));
-            tick_text.add_child(SVG::Text(coord.first - 5, coord.second, y_labels[i]));
+tick_text.add_child(SVG::Text(coord.first - 5, coord.second, y_labels[i]));
         }
 
         this->y_axis_group->add_child(ticks, tick_text);
     }
 
     template<>
-    inline SVG::Group Graph<CategoricalData>::make_bar(
+    inline SVG::SVG* Graph<CategoricalData>::make_bar(
         CategoricalData& data, const std::string color) {
         /** Distribute bars evenly across graph canvas */
-        SVG::Group bars;
+        SVG::SVG bars;
         bars.set_attr("fill", color);
 
         std::pair<float, float> coord;
@@ -617,16 +632,14 @@ namespace Graphs {
             temp_x1 += x_tick_space;
         }
 
-        // Temporary
-        this->root.add_child(bars);
-        return bars;
+        return (SVG::SVG*)this->root.add_child(bars);
     }
 
     template<class T>
-    inline SVG::Group Graph<T>::make_point(T& data, const std::string color) {
+    inline SVG::SVG* Graph<T>::make_point(T& data, const std::string color) {
         std::pair<float, float> coord;
         float dot_radius = 2;
-        SVG::Group dots;
+        SVG::SVG dots;
         dots.set_attr("fill", color);
 
         // Add each dot
@@ -638,9 +651,7 @@ namespace Graphs {
             dots.add_child(SVG::Circle(coord.first, coord.second, (float)dot_radius));
         }
 
-        // Temporary
-        this->root.add_child(dots);
-        return dots;
+        return (SVG::SVG*)this->root.add_child(dots);
     }
 
     template<class T>
@@ -663,44 +674,96 @@ namespace Graphs {
     public:
         MultiGraph(GraphOptions options = DEFAULT_GRAPH_LEGEND)
             : Graph<T>(options) {};
+
+        void make_bar(
+            DatasetCollection<T>& data,
+            const std::string color = QUALITATIVE_COLORS[0]
+        );
+
+        void make_point(
+            DatasetCollection<T>& data,
+            const std::string color = QUALITATIVE_COLORS[0]
+        );
+
         void plot(DatasetCollection<T>& data);
+        void make_legend(DatasetCollection<T>& data);
 
     protected:
-        std::vector<SVG::Group*> dot_groups;
-        void make_legend();
+        std::vector<SVG::SVG*> data_groups;
     };
 
-    template<class T>
-    void MultiGraph<T>::plot(DatasetCollection<T>& data) {
-        SVG::Group* grp_ptr;
-        auto color = QUALITATIVE_COLORS.begin();
-        rect = CartesianCoordinates(this->options, data);
-        make_x_axis(data);
-        make_y_axis(data);
+    template<>
+    inline void MultiGraph<CategoricalData>::make_bar(
+        DatasetCollection<CategoricalData>& data,
+        const std::string color
+    ) {
+        SVG::SVG* bar_container;
+        auto fill_color = QUALITATIVE_COLORS.begin();
+        float bar_size = 0, bar_x = 0, i = 0;
 
         for (auto it = data.datasets.begin(); it != data.datasets.end(); ++it) {
-            if (color == QUALITATIVE_COLORS.end())
-                color = QUALITATIVE_COLORS.begin();
+            if (fill_color == QUALITATIVE_COLORS.end())
+                fill_color = QUALITATIVE_COLORS.begin();
+            bar_container = Graph<CategoricalData>::make_bar(*it, *fill_color);
 
-            grp_ptr = (SVG::Group*)this->root.add_child(make_point(*it, *color));
-            this->dot_groups.push_back(grp_ptr);
-            ++color;
+            // For make_legend()
+            this->data_groups.push_back(bar_container);
+
+            for (auto it = bar_container->children.begin();
+                it != bar_container->children.end(); ++it) {
+                if (bar_size == 0)
+                    bar_size = std::stof(it->get()->attr["width"]);
+
+                // Resize and replace bars in place
+                bar_x = std::stof(it->get()->attr["x"]);
+                it->get()->set_attr("width", bar_size/data.datasets.size());
+                it->get()->set_attr("x", bar_x + (i * bar_size / data.datasets.size()));
+            }
+
+            ++fill_color;
+            i++;
         }
-
-        make_legend();
     }
 
     template<class T>
-    void MultiGraph<T>::make_legend() {
+    inline void MultiGraph<T>::make_point(
+        DatasetCollection<T>& data,
+        const std::string color
+    ) {
+        auto fill_color = QUALITATIVE_COLORS.begin();
+        for (auto it = data.datasets.begin(); it != data.datasets.end(); ++it) {
+            if (fill_color == QUALITATIVE_COLORS.end())
+                fill_color = QUALITATIVE_COLORS.begin();
+
+            // For make_legend()
+            this->data_groups.push_back(Graph<T>::make_point(*it, *fill_color));
+            ++fill_color;
+        }
+    }
+
+    template<class T>
+    inline void MultiGraph<T>::plot(DatasetCollection<T>& data) {
+        rect = CartesianCoordinates<T>(this->options, data);
+        make_x_axis(data);
+        make_y_axis(data);
+    }
+
+    template<class T>
+    inline void MultiGraph<T>::make_legend(DatasetCollection<T>& data) {
         // TODO: Make this less atrocious
         Legend legend;
-
         std::vector<std::string> labels;
         std::vector<std::string> fills;
 
-        for (size_t i = 1; i <= dot_groups.size(); i++) {
-            labels.push_back("Group " + std::to_string(i));
-            fills.push_back(dot_groups[i - 1]->attr["fill"]);
+        size_t i = 1; // Temporary, I hope
+        for (auto it = data.datasets.begin(); it != data.datasets.end(); ++it) {
+            if (it->name.empty())
+                labels.push_back("Group " + std::to_string(i));
+            else
+                labels.push_back(it->name);
+
+            fills.push_back(data_groups[i - 1]->attr["fill"]);
+            i++;
         }
 
         legend.labels = labels;

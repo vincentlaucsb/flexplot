@@ -73,4 +73,20 @@ namespace Graphs {
         ret.datasets.push_back(other);
         return ret;
     }
+
+    DatasetCollection<CategoricalData> CategoricalData::operator+ (CategoricalData& other) {
+        DatasetCollection<CategoricalData> ret;
+        ret.datasets.push_back(*this);
+        ret.datasets.push_back(other);
+        return ret;
+    }
+
+    std::vector<std::string> DatasetCollection<NumericData>::x_labels(size_t max_labels) {
+        return DatasetBase::x_labels(max_labels);
+    }
+
+    std::vector<std::string> DatasetCollection<CategoricalData>::x_labels(size_t max_labels) {
+        // Assumes all CategoricalData objects have the same labels
+        return this->datasets.begin()->x_values;
+    }
 }
