@@ -153,22 +153,11 @@ namespace Graphs {
     }
     **/
 
-    RadarChart::RadarChart(size_t axes) : n_axes(axes) {
-        SVG::Line line;
-        std::pair<double, double> coord;
-        root.set_attr("width", 500);
-        root.set_attr("height", 500);
-
-        // Draw up axes
-        for (double i = 0; i < axes; i++) {
-            coord = polar.map((i / axes) * 2 * PI);
-            line = SVG::Line(polar.center().first, coord.first,
-                polar.center().second, coord.second);
-            line.set_attr("stroke-width", 2).set_attr("stroke", "black");
-            this->axes.push_back((SVG::Line*)root.add_child(line));
-        }
-
-        this->make_grid();
+    RadarChart::RadarChart() : MultiGraph<CategoricalData>(POLAR_GRAPH_LEGEND) {
+        // Set up coordinate system
+        std::pair<float, float> center = this->rect.center();
+        float radius = std::min(this->rect.get_width(), this->rect.get_height()) / 2;
+        this->polar = PolarCoordinates(center.first, center.second, radius);
     }
 
     void RadarChart::make_grid(size_t lines) {
@@ -177,7 +166,8 @@ namespace Graphs {
         SVG::Circle line;
         grid.set_attr("fill", "none")
             .set_attr("stroke", "#cccccc")
-            .set_attr("stroke-width", 1);
+            .set_attr("stroke-width", 1)
+            .set_attr("stroke-dasharray", "10, 5");
 
         for (float i = 0; i <= lines; i++)
             grid.add_child(SVG::Circle(polar.center(), polar.radius * i / lines));
@@ -185,26 +175,91 @@ namespace Graphs {
         root.add_child(grid);
     }
 
-    void RadarChart::plot(vector<float> percentages) {
-        /** Plot each of the percentages on an axis on the radar chart */
-        if (percentages.size() != n_axes)
-            throw std::runtime_error("Expected " + std::to_string(n_axes) + "data points"
-                + " but got " + std::to_string(percentages.size()));
+    void RadarChart::make_axes(DatasetCollection<CategoricalData>& data) {
+        /** Draw up axes */
+        SVG::Group category_labels;
+        category_labels.set_attr("font-family", "sans-serif");
 
-        // Add line connecting end of each axis
-        SVG::Path data_line;
+        SVG::Group axis_labels;
+        SVG::Text label;
+        Axis line;
+        std::vector<std::string> labels;
+        const size_t axes = data.size();
         std::pair<float, float> coord;
+        float radians;
 
-        for (size_t i = 0; i < percentages.size(); i++) {
-            coord = axes[i]->along(percentages[i]); // Map percentage to SVG space
-            data_line.line_to(coord.first, coord.second);
+        // Draw lines
+        for (double i = 0; i < axes; i++) {
+            radians = (i / axes) * 2 * PI;
+            axis_labels = SVG::Group();
+            axis_labels.set_attr("font-family", "sans-serif")
+                .set_attr("font-size", "14px");
+
+            labels = data.y_labels(i, this->grid_lines);
+            coord = polar.map(radians);
+            line = Axis(polar.center().first, coord.first,
+                polar.center().second, coord.second);
+            line.set_attr("stroke-width", 1).set_attr("stroke", "black");
+            this->axes.push_back((Axis*)root.add_child(line));
+
+            // Add text labels -- skip origin
+            for (size_t j = 1; j <= this->grid_lines; j++) {
+                coord = this->axes[i]->along((float)j / (float)this->grid_lines);
+                label = SVG::Text(coord, labels[j]);
+                if (radians > PI)
+                    label.set_attr("text-anchor", "start");
+                else
+                    label.set_attr("text-anchor", "end");
+                axis_labels.add_child(label);
+            }
+
+            // Add category label
+            coord = this->axes[i]->along(1);
+            label = SVG::Text(coord, data.x_labels()[i]);
+            if (radians > PI)
+                label.set_attr("text-anchor", "end");
+            else
+                label.set_attr("text-anchor", "start");
+
+            category_labels.add_child(label);
+            this->root.add_child(axis_labels);
         }
 
-        data_line.to_origin();
-        data_line.set_attr("stroke-width", 2)
-            .set_attr("fill", "none").set_attr("stroke", "blue");
+        this->root.add_child(category_labels);
+    }
 
-        root.add_child(data_line);
+    void RadarChart::plot(DatasetCollection<CategoricalData> data) {
+        /** Plot each of the percentages on an axis on the radar chart */
+        std::vector<std::string> fill_colors = data.get_fill(),
+            stroke_colors = data.get_stroke();
+        auto fill_color = fill_colors.begin(), stroke_color = stroke_colors.begin();
+        SVG::Text label;
+        std::pair<float, float> coord;
+        this->make_grid(this->grid_lines);
+        this->make_axes(data);
+
+        // Set scale for each axis
+        for (size_t i = 0; i < data.size(); i++)
+            this->axes[i]->set_scale(data.y_min(i), data.y_max(i));
+
+        // Add lines connecting end of each axis
+        for (auto it = data.datasets.begin(); it != data.datasets.end(); ++it) {
+            SVG::Path data_line;
+            for (size_t i = 0; i < data.size(); i++) {
+                coord = axes[i]->map(it->y_values.at(i));
+                data_line.line_to(coord.first, coord.second);
+            }
+
+            data_line.to_origin();
+            data_line.set_attr("stroke", *stroke_color).set_attr("stroke-width", 2)
+                .set_attr("stroke-opacity", 0.8)
+                .set_attr("fill", *fill_color)
+                .set_attr("fill-opacity", 0.3);
+
+            root.add_child(data_line);
+            ++fill_color;
+            ++stroke_color;
+        }
     }
 
     std::pair<float, float> PolarCoordinates::center() {
@@ -215,5 +270,15 @@ namespace Graphs {
         float x = percent * radius * cos(degrees) + this->x;
         float y = percent * radius * sin(degrees) + this->y;
         return std::make_pair(x, y);
+    }
+
+    void RadarChart::Axis::set_scale(float min, float max) {
+        this->min = min;
+        this->max = max;
+    }
+
+    std::pair<float, float> RadarChart::Axis::map(float data) {
+        float percent = (data - min) / max;
+        return this->along(percent);
     }
 }

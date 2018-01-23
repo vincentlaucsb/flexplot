@@ -3,6 +3,16 @@
 // Statistical preprocessing on data
 
 namespace Graphs {
+    std::string to_string(float number, size_t n) {
+        /** Return a float as a string, cutting it off at 
+         *  n decimal places
+         */
+
+        std::string temp = std::to_string(number);
+        size_t dec_pos = temp.find_first_of('.');
+        return temp.substr(0, dec_pos + 1 + n);
+    }
+
     NumericData::NumericData(
         const std::vector<long double> x,
         const std::vector<long double> y,
@@ -36,12 +46,12 @@ namespace Graphs {
         return labels;
     }
 
-    std::vector<std::string> DatasetBase::y_labels(size_t labels) {
+    std::vector<std::string> DatasetBase::y_labels(const size_t labels) {
         std::vector<std::string> ret_labels;
 
         // Set bin labels to left-hand boundary values
         for (size_t i = 0; i <= labels; i++) {
-            ret_labels.push_back(std::to_string(
+            ret_labels.push_back(Graphs::to_string(
                 y_min() + i*(y_max() - y_min()) / labels));
         }
 

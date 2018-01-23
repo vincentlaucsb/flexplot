@@ -135,6 +135,8 @@ namespace SVG {
             set_attr("y", std::to_string(y));
             content = _content;
         }
+        Text(std::pair<float, float> xy, std::string _content) :
+            Text(xy.first, xy.second, _content) {};
 
         std::string to_string() override;
     };
@@ -213,8 +215,9 @@ namespace Graphs {
         int margin_top;     /*< Also includes space for title */
     };
 
-    const GraphOptions DEFAULT_GRAPH = { 800, 400, 100, 50, 100, 50 };
-    const GraphOptions DEFAULT_GRAPH_LEGEND = { 800, 400, 100, 200, 100, 50 };
+    const GraphOptions DEFAULT_GRAPH = { 800, 400, 75, 50, 100, 50 };
+    const GraphOptions DEFAULT_GRAPH_LEGEND = { 800, 400, 75, 200, 100, 50 };
+    const GraphOptions POLAR_GRAPH_LEGEND = { 800, 600, 50, 200, 50, 50 };
 
     /** Abstract base class for Dataset* */
     class DatasetBase {
@@ -225,7 +228,7 @@ namespace Graphs {
         virtual long double y_min() = 0;
         virtual long double y_max() = 0;
         virtual std::vector<std::string> x_labels(size_t max_labels = 20);
-        virtual std::vector<std::string> y_labels(size_t labels=5);
+        virtual std::vector<std::string> y_labels(const size_t labels=5);
     };
 
     template <class T>
@@ -265,13 +268,24 @@ namespace Graphs {
         DatasetCollection() {};
         std::vector<T> datasets;
 
-        DatasetCollection<T>& operator+ (T& data) {
-            /** Append data to the set */
-            datasets.push_back(data);
+        inline DatasetCollection<T>& operator+ (T& data) {
+            this->datasets.push_back(data);
             return *this;
         }
 
         std::vector<std::string> x_labels(size_t max_labels = 20) override;
+        inline std::vector<std::string> y_labels(const size_t i, const size_t labels) {
+            /** Create axis labels for elements at index i */
+            std::vector<std::string> ret_labels;
+
+            // Set bin labels to left-hand boundary values
+            for (size_t j = 0; j <= labels; j++) {
+                ret_labels.push_back(Graphs::to_string(
+                    y_min(i) + j*(y_max(i) - y_min(i)) / labels));
+            }
+
+            return ret_labels;
+        }
 
         inline const size_t size() override { 
             if (datasets.empty())
@@ -298,6 +312,60 @@ namespace Graphs {
 
             return max;
         }
+
+        inline long double y_min(const size_t i) {
+            /** Get the smallest value for items with index i */
+            long double min = 0; // Always set 0 as lowest unless there's a lower number
+            for (auto it = datasets.begin(); it != datasets.end(); ++it)
+                if (isnan(min) || it->y_values.at(i) < min) min = it->y_values.at(i);
+            return min;
+        }
+
+        inline long double y_max(const size_t i) {
+            /** Get the largest value for items with index i */
+            long double max = 0; // Always set 0 as lowest unless there's a lower number
+            for (auto it = datasets.begin(); it != datasets.end(); ++it)
+                if (isnan(max) || it->y_values.at(i) > max) max = it->y_values.at(i);
+            return max;
+        }
+
+        inline void set_fill(const std::vector<std::string>& colors) {
+            set_colors(this->fill_colors, colors);
+        }
+
+        inline void set_stroke(const std::vector<std::string>& colors) {
+            set_colors(this->stroke_colors, colors);
+        }
+
+        inline std::vector<std::string> get_fill() {
+            if (this->fill_colors.empty())
+                this->set_colors(this->fill_colors, QUALITATIVE_COLORS);
+            return this->fill_colors;
+        }
+
+        inline std::vector<std::string> get_stroke() {
+            /** Use fill colors if stroke colors not set */
+            if (this->stroke_colors.empty())
+                return this->get_fill();
+            return this->stroke_colors;
+        }
+
+    private:
+        inline void set_colors(
+            std::vector<std::string>& target,
+            const std::vector<std::string>& colors) {
+            auto fill_color = colors.begin();
+            while (target.size() < this->datasets.size()) {
+                target.push_back(*fill_color);
+                fill_color++;
+
+                if (fill_color == colors.end())
+                    fill_color = colors.begin();
+            }
+        }
+
+        std::vector<std::string> fill_colors = {};
+        std::vector<std::string> stroke_colors = {};
     };
 
     /** Data used to plot bar plots, histograms, etc. */
@@ -308,8 +376,6 @@ namespace Graphs {
 
         DatasetCollection<CategoricalData> operator+ (CategoricalData& other);
         inline std::vector<std::string> x_labels(size_t max_labels=20) override { return this->x_values; }
-        inline long double min_height() { return this->y_min(); }
-        inline long double max_height() { return this->y_max(); }
     };
 
     class NumericData : public Dataset<long double> {
@@ -345,11 +411,16 @@ namespace Graphs {
     class CartesianCoordinates {
     public:
         CartesianCoordinates() {};
-        CartesianCoordinates(const GraphOptions& options, DatasetBase& data) :
+
+        CartesianCoordinates(const GraphOptions& options) :
             x1((float)options.margin_left),
             x2((float)options.width - (float)options.margin_right),
             y1((float)options.margin_top),
-            y2((float)options.height - (float)options.margin_bottom) {
+            y2((float)options.height - (float)options.margin_bottom)
+        { }
+
+        CartesianCoordinates(const GraphOptions& options, DatasetBase& data) :
+        CartesianCoordinates(options) {
             domain_min = data.x_min();
             domain_max = data.x_max();
             range_min = data.y_min();
@@ -364,6 +435,16 @@ namespace Graphs {
             float ret_x = map_x(x), ret_y = map_y(y);
             return std::make_pair(ret_x, ret_y);
         };
+
+        inline std::pair<float, float> center() {
+            /** Return the center of the drawing area */
+            float x = x1 + ((x2 - x1) / 2);
+            float y = y1 + ((y2 - y1) / 2);
+            return std::make_pair(x, y);
+        }
+
+        inline float get_height() { return y2 - y1; }
+        inline float get_width() { return x2 - y1; }
 
         float x1;
         float x2;
@@ -389,6 +470,7 @@ namespace Graphs {
     /** Defines a mapping from polar coordinates to the SVG coordinate space */
     class PolarCoordinates {
     public:
+        PolarCoordinates() {};
         PolarCoordinates(float cx, float cy, float cr) :
             x(cx), y(cy), radius(cr) {};
         std::pair<float, float> map(float degrees, float percent = 1);
@@ -462,14 +544,14 @@ namespace Graphs {
             this->ylab->content = y_lab;
         }
 
+        int bar_spacing = 10;
+        int tick_size = 5;
+
     protected:
         CartesianCoordinates<T> rect; /*< Used to map stuff onto the drawing area */
 
         void make_x_axis(DatasetBase &data);
         void make_y_axis(DatasetBase &data);
-
-        int bar_spacing = 2;
-        int tick_size = 5;
 
         SVG::Element* title = nullptr; /*< Pointer set by constructor */
         SVG::Element* xlab = nullptr;
@@ -488,6 +570,7 @@ namespace Graphs {
         int height = _options.height;
 
         this->root.set_attr("width", width).set_attr("height", height);
+        this->rect = CartesianCoordinates<T>(_options);
 
         // Make title
         SVG::SVG title_wrapper;
@@ -698,17 +781,13 @@ tick_text.add_child(SVG::Text(coord.first - 5, coord.second, y_labels[i]));
         const std::string color
     ) {
         SVG::SVG* bar_container;
-        auto fill_color = QUALITATIVE_COLORS.begin();
-        float bar_size = 0, bar_x = 0, i = 0;
+        std::vector<std::string> fill_colors = data.get_fill();
+        float bar_size = 0, bar_x = 0;
 
-        for (auto it = data.datasets.begin(); it != data.datasets.end(); ++it) {
-            if (fill_color == QUALITATIVE_COLORS.end())
-                fill_color = QUALITATIVE_COLORS.begin();
-            bar_container = Graph<CategoricalData>::make_bar(*it, *fill_color);
-
-            // For make_legend()
+        for (size_t i = 0; i < data.datasets.size(); i++) {
+            bar_container = Graph<CategoricalData>::make_bar(
+                data.datasets[i], fill_colors[i]);
             this->data_groups.push_back(bar_container);
-
             for (auto it = bar_container->children.begin();
                 it != bar_container->children.end(); ++it) {
                 if (bar_size == 0)
@@ -717,11 +796,8 @@ tick_text.add_child(SVG::Text(coord.first - 5, coord.second, y_labels[i]));
                 // Resize and replace bars in place
                 bar_x = std::stof(it->get()->attr["x"]);
                 it->get()->set_attr("width", bar_size/data.datasets.size());
-                it->get()->set_attr("x", bar_x + (i * bar_size / data.datasets.size()));
+                it->get()->set_attr("x", bar_x + ((float)i * bar_size / data.datasets.size()));
             }
-
-            ++fill_color;
-            i++;
         }
     }
 
@@ -730,14 +806,10 @@ tick_text.add_child(SVG::Text(coord.first - 5, coord.second, y_labels[i]));
         DatasetCollection<T>& data,
         const std::string color
     ) {
-        auto fill_color = QUALITATIVE_COLORS.begin();
-        for (auto it = data.datasets.begin(); it != data.datasets.end(); ++it) {
-            if (fill_color == QUALITATIVE_COLORS.end())
-                fill_color = QUALITATIVE_COLORS.begin();
-
-            // For make_legend()
-            this->data_groups.push_back(Graph<T>::make_point(*it, *fill_color));
-            ++fill_color;
+        std::vector<std::string> fill_colors = data.get_fill();
+        for (size_t i = 0; i < data.datasets.size(); i++) {
+            this->data_groups.push_back(Graph<T>::make_point(
+                data.datasets[i], fill_colors[i]));
         }
     }
 
@@ -750,10 +822,8 @@ tick_text.add_child(SVG::Text(coord.first - 5, coord.second, y_labels[i]));
 
     template<class T>
     inline void MultiGraph<T>::make_legend(DatasetCollection<T>& data) {
-        // TODO: Make this less atrocious
         Legend legend;
         std::vector<std::string> labels;
-        std::vector<std::string> fills;
 
         size_t i = 1; // Temporary, I hope
         for (auto it = data.datasets.begin(); it != data.datasets.end(); ++it) {
@@ -761,13 +831,11 @@ tick_text.add_child(SVG::Text(coord.first - 5, coord.second, y_labels[i]));
                 labels.push_back("Group " + std::to_string(i));
             else
                 labels.push_back(it->name);
-
-            fills.push_back(data_groups[i - 1]->attr["fill"]);
             i++;
         }
 
         legend.labels = labels;
-        legend.fills = fills;
+        legend.fills = data.get_fill();
         legend.generate();
 
         legend.root.set_attr("x", rect.x2 + 10);
@@ -775,16 +843,33 @@ tick_text.add_child(SVG::Text(coord.first - 5, coord.second, y_labels[i]));
         this->root.add_child(legend.root);
     }
 
-    class RadarChart : public PlotBase {
+    class RadarChart : public MultiGraph<CategoricalData> {
+        class Axis : public SVG::Line {
+        public:
+            using SVG::Line::Line;
+            void set_scale(float min, float max);
+            std::pair<float, float> map(float data);
+
+        private:
+            float min = 0;
+            float max = 1;
+        };
+
     public:
-        RadarChart(size_t axes);
-        void plot(vector<float> percentages);
+        RadarChart();
+        std::vector<Axis*> axes;
+        void plot(DatasetCollection<CategoricalData> data);
+
+        size_t grid_lines = 10;
+
+    protected:
+        void make_axes(DatasetCollection<CategoricalData>& data);
+
     private:
-        PolarCoordinates polar = { 250, 250, 250 };
-        void make_grid(size_t lines=10);
+        PolarCoordinates polar;
+        void make_grid(size_t lines);
 
         size_t n_axes;
-        std::vector<SVG::Line*> axes;
     };
 
     /**
@@ -808,4 +893,6 @@ tick_text.add_child(SVG::Text(coord.first - 5, coord.second, y_labels[i]));
         ColumnNotFoundError(const std::string& col_name) : std::runtime_error(
             "Couldn't find a column named " + col_name) {};
     };
+
+    std::string to_string(float number, size_t n = 1);
 }
